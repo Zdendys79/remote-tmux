@@ -223,6 +223,19 @@ html, body {
 
 .session-btn:hover { background: #2a2a2a; border-color: #555; }
 
+.session-btn.session-open {
+  color: #666;
+  border-color: #2a2a2a;
+  background: #111;
+  cursor: default;
+  text-decoration: line-through;
+}
+
+.session-btn.session-open::after {
+  content: ' ✓';
+  color: #4a9eff;
+}
+
 .dialog-cancel {
   margin-top: 12px;
   background: #333;
@@ -343,10 +356,14 @@ html, body {
   background-image: radial-gradient(circle, #4a9eff 1.5px, transparent 1.5px);
 }
 
-/* ── Mobile: single panel ── */
+/* ── Drag-and-drop ── */
 
-@media (max-width: 899px) {
-  #panel-right { display: none; }
-  #divider { display: none; }
-  #panel-left { flex: 1; }
+.tab.dragging {
+  opacity: 0.35;
+}
+
+.tabbar.drag-over {
+  background: #1a3a5a;
+  outline: 2px solid #4a9eff;
+  outline-offset: -2px;
 }

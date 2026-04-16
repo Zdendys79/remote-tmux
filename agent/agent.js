@@ -152,7 +152,7 @@ function connect() {
       }
 
     } else if (msg.type === 'resize') {
-      if (activePty) {
+      if (activePty && msg.cols > 0 && msg.rows > 0) {
         activePty.resize(msg.cols, msg.rows);
       }
 
@@ -175,7 +175,7 @@ function connect() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function btoa(str) { return Buffer.from(str, 'binary').toString('base64'); }
+function btoa(str) { return Buffer.from(str).toString('base64'); }
 function atob(b64) { return Buffer.from(b64, 'base64').toString('binary'); }
 
 // ── Start ──────────────────────────────────────────────────────────────────

@@ -24,30 +24,45 @@ echo ""
 
 # ── Checks ──────────────────────────────────────────────────────────────────
 
-[[ $EUID -ne 0 ]] && err "Run as root: sudo bash <(curl -s https://${RELAY_HOST}/setup)"
+[[ $EUID -ne 0 ]] && err "Run as root: curl https://${RELAY_HOST}/setup | sudo bash"
 
-for cmd in node npm tmux openssl curl; do
+# Detect the real user who invoked sudo (tmux sessions belong to them)
+REAL_USER="${SUDO_USER:-}"
+if [[ -z "$REAL_USER" ]]; then
+  # Not via sudo — ask
+  ask "Username whose tmux sessions should be exposed: "
+  read -r REAL_USER </dev/tty
+fi
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+REAL_UID=$(id -u "$REAL_USER")
+info "Running agent as user: ${REAL_USER} (uid=${REAL_UID})"
+
+for cmd in tmux openssl curl; do
   if ! command -v "$cmd" &>/dev/null; then
     warn "$cmd not found, installing..."
     apt-get install -y "$cmd" 2>/dev/null || err "Could not install $cmd. Install it manually and retry."
   fi
 done
 
-# Node.js version check
-NODE_MAJOR=$(node -e "process.stdout.write(process.version.split('.')[0].slice(1))")
-if [[ "$NODE_MAJOR" -lt 18 ]]; then
-  err "Node.js 18+ required (found $(node --version)). See https://nodejs.org/"
+# Node.js: ensure 18+
+if ! command -v node &>/dev/null || \
+   [[ $(node -e "process.stdout.write(process.version.split('.')[0].slice(1))") -lt 18 ]]; then
+  warn "Node.js 18+ not found, installing via NodeSource..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    || err "Could not install Node.js. Install it manually (https://nodejs.org/) and retry."
+  ok "Node.js $(node --version) installed"
 fi
 
 # ── Agent name ───────────────────────────────────────────────────────────────
 
 DEFAULT_NAME=$(hostname -s)
 ask "Agent name (identifies this machine on relay) [${DEFAULT_NAME}]: "
-read -r AGENT_NAME
+read -r AGENT_NAME </dev/tty
 AGENT_NAME="${AGENT_NAME:-$DEFAULT_NAME}"
 
-# Sanitize: lowercase, alphanumeric + hyphen only
-AGENT_NAME=$(echo "$AGENT_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | sed 's/^-//;s/-$//')
+# Sanitize: alphanumeric + hyphen only
+AGENT_NAME=$(echo "$AGENT_NAME" | tr -cs 'a-zA-Z0-9-' '-' | sed 's/^-//;s/-$//')
 info "Using agent name: ${AGENT_NAME}"
 
 # ── Certificate setup ────────────────────────────────────────────────────────
@@ -66,7 +81,7 @@ echo "    scripts/issue-cert.sh ${AGENT_NAME}"
 echo "  Then copy the 3 files to this machine."
 echo ""
 ask "Path to directory containing the 3 cert files [/tmp]: "
-read -r CERT_SRC
+read -r CERT_SRC </dev/tty
 CERT_SRC="${CERT_SRC:-/tmp}"
 
 KEY_SRC="${CERT_SRC}/${AGENT_NAME}.key"
@@ -88,10 +103,10 @@ ok "Certificate verified (CN=${CERT_CN})"
 
 echo ""
 ask "TMux sessions to expose (comma-separated, empty = auto-detect all): "
-read -r TMUX_SESSIONS
+read -r TMUX_SESSIONS </dev/tty
 
 ask "TTY consoles to expose (e.g. tty1, empty = none): "
-read -r TTY_SESSIONS
+read -r TTY_SESSIONS </dev/tty
 
 # ── Install ──────────────────────────────────────────────────────────────────
 
@@ -101,16 +116,18 @@ info "Installing agent to ${INSTALL_DIR}..."
 mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
 
-# Copy certs
+# Copy certs — owned by real user (key is private, dir accessible only to owner)
 install -m 600 "$KEY_SRC" "${CONFIG_DIR}/${AGENT_NAME}.key"
 install -m 644 "$CRT_SRC" "${CONFIG_DIR}/${AGENT_NAME}.crt"
 install -m 644 "$CA_SRC"  "${CONFIG_DIR}/ca.crt"
+chown -R "${REAL_USER}:${REAL_USER}" "$CONFIG_DIR"
 ok "Certificates installed to ${CONFIG_DIR}"
 
 # Download agent files
 info "Downloading agent..."
 curl -fsSL "https://${RELAY_HOST}/agent/agent.js"       -o "${INSTALL_DIR}/agent.js"
 curl -fsSL "https://${RELAY_HOST}/agent/package.json"   -o "${INSTALL_DIR}/package.json"
+chown -R "${REAL_USER}:${REAL_USER}" "$INSTALL_DIR"
 
 # Write .env
 cat > "${INSTALL_DIR}/.env" <<ENV
@@ -123,19 +140,20 @@ TMUX_SESSIONS=${TMUX_SESSIONS}
 TTY_SESSIONS=${TTY_SESSIONS}
 ENV
 chmod 600 "${INSTALL_DIR}/.env"
+chown "${REAL_USER}:${REAL_USER}" "${INSTALL_DIR}/.env"
 
-# npm install
+# npm install (as real user so node_modules are accessible)
 info "Installing Node.js dependencies..."
 cd "$INSTALL_DIR"
-npm install --omit=dev --silent
+sudo -u "$REAL_USER" npm install --omit=dev --silent
 ok "Dependencies installed"
 
 # ── PM2 or systemd ───────────────────────────────────────────────────────────
 
 if command -v pm2 &>/dev/null; then
   info "Setting up PM2 service..."
-  pm2 start "${INSTALL_DIR}/agent.js" --name "$SERVICE_NAME" --cwd "$INSTALL_DIR"
-  pm2 save
+  sudo -u "$REAL_USER" pm2 start "${INSTALL_DIR}/agent.js" --name "$SERVICE_NAME" --cwd "$INSTALL_DIR"
+  sudo -u "$REAL_USER" pm2 save
   ok "Agent running via PM2 (pm2 logs ${SERVICE_NAME})"
 else
   info "PM2 not found, setting up systemd service..."
@@ -147,7 +165,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=${REAL_USER}
 WorkingDirectory=${INSTALL_DIR}
 ExecStart=${NODE_BIN} ${INSTALL_DIR}/agent.js
 Restart=always
