@@ -37,12 +37,18 @@ REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 REAL_UID=$(id -u "$REAL_USER")
 info "Running agent as user: ${REAL_USER} (uid=${REAL_UID})"
 
-for cmd in tmux openssl curl; do
+for cmd in tmux openssl curl conspy; do
   if ! command -v "$cmd" &>/dev/null; then
     warn "$cmd not found, installing..."
-    apt-get install -y "$cmd" 2>/dev/null || err "Could not install $cmd. Install it manually and retry."
+    apt-get install -y "$cmd" 2>/dev/null || warn "Could not install $cmd (TTY console access will not work)."
   fi
 done
+
+# Ensure real user is in tty group (needed for conspy to access /dev/ttyN)
+if ! id -nG "$REAL_USER" 2>/dev/null | grep -qw tty; then
+  usermod -aG tty "$REAL_USER"
+  info "Added ${REAL_USER} to group 'tty' (conspy access). Re-login required for shell, but service uses new group immediately."
+fi
 
 # Node.js: ensure 18+
 if ! command -v node &>/dev/null || \

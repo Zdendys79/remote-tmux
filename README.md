@@ -32,6 +32,7 @@ Agents initiate **outbound** connections → works behind any NAT or firewall.
 | TLS certificate | For the relay domain (Let's Encrypt recommended) |
 | Node.js 18+ | Relay server + each agent machine |
 | tmux | Each agent machine |
+| conspy | Each agent machine (only for TTY console access) |
 
 ---
 
@@ -195,6 +196,16 @@ If using a self-signed relay certificate, set `NODE_EXTRA_CA_CERTS` in the syste
 ```ini
 Environment=NODE_EXTRA_CA_CERTS=/etc/remote-tmux/relay.crt
 ```
+
+**TTY session fails with `execvp(3) failed.: No such file or directory`**
+
+`conspy` is not installed. Fix:
+```bash
+sudo apt-get install conspy
+sudo usermod -aG tty YOUR_USER
+sudo systemctl restart remote-tmux-agent
+```
+The install script handles this automatically on new installations.
 
 **Agent connects but shows no sessions**
 
