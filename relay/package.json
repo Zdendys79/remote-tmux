@@ -1,0 +1,13 @@
+{
+  "name": "remote-tmux-relay",
+  "version": "1.0.0",
+  "description": "WebSocket relay for remote tmux sessions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "dotenv": "^16.4.7"
+  }
+}
