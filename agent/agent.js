@@ -83,10 +83,11 @@ function attachSession(sessionName, cols, rows) {
 
   console.log(`[INFO] Attaching to ${entry.type} session: ${sessionName}`);
 
-  // Strip tmux nesting vars so tmux attach-session works from any context
+  // Strip tmux/terminal vars that cause tmux to exit immediately
   const ptyEnv = { ...process.env };
   delete ptyEnv.TMUX;
   delete ptyEnv.TMUX_PANE;
+  ptyEnv.TERM = 'xterm-256color';
 
   activePty = pty.spawn(command, args, {
     name: 'xterm-256color',
@@ -97,24 +98,22 @@ function attachSession(sessionName, cols, rows) {
 
   activeSession = sessionName;
 
-  let firstChunk = true;
   activePty.onData((data) => {
-    if (firstChunk) {
-      console.log(`[DEBUG] PTY first data: ${data.length} bytes`);
-      firstChunk = false;
-    }
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'output', data: btoa(data) }));
     }
   });
 
-  activePty.onExit(() => {
-    console.log(`[INFO] PTY exited for session: ${sessionName}`);
-    activePty = null;
-    activeSession = null;
+  activePty.onExit(({ exitCode }) => {
+    console.log(`[INFO] PTY exited for session: ${sessionName} (code ${exitCode})`);
+    // Notify browser so it shows a message instead of silent freeze
     if (ws?.readyState === WebSocket.OPEN) {
+      const msg = `\r\n\x1b[33m[Session '${sessionName}' ended (exit ${exitCode}). Close this tab.]\x1b[0m\r\n`;
+      ws.send(JSON.stringify({ type: 'output', data: Buffer.from(msg).toString('base64') }));
       ws.send(JSON.stringify({ type: 'session_list', sessions: discoverSessions().map(s => s.name) }));
     }
+    activePty = null;
+    activeSession = null;
   });
 }
 
@@ -143,10 +142,7 @@ function connect() {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    console.log(`[DEBUG] relay msg: ${msg.type}`);
-
     if (msg.type === 'attach') {
-      console.log(`[DEBUG] attaching to session: ${msg.session}`);
       attachSession(msg.session, msg.cols, msg.rows);
 
     } else if (msg.type === 'input') {
