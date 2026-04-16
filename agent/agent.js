@@ -83,11 +83,16 @@ function attachSession(sessionName, cols, rows) {
 
   console.log(`[INFO] Attaching to ${entry.type} session: ${sessionName}`);
 
+  // Strip tmux nesting vars so tmux attach-session works from any context
+  const ptyEnv = { ...process.env };
+  delete ptyEnv.TMUX;
+  delete ptyEnv.TMUX_PANE;
+
   activePty = pty.spawn(command, args, {
     name: 'xterm-256color',
     cols: cols || 220,
     rows: rows || 50,
-    env: process.env,
+    env: ptyEnv,
   });
 
   activeSession = sessionName;
