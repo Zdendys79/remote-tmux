@@ -206,8 +206,9 @@
         btn.className = 'session-btn';
         btn.textContent = session;
         btn.addEventListener('click', () => {
+          const target = dialogTarget;
           closeDialogEl();
-          createTab(dialogTarget, agent.name, session);
+          createTab(target, agent.name, session);
         });
         group.appendChild(btn);
       }

@@ -97,7 +97,12 @@ function attachSession(sessionName, cols, rows) {
 
   activeSession = sessionName;
 
+  let firstChunk = true;
   activePty.onData((data) => {
+    if (firstChunk) {
+      console.log(`[DEBUG] PTY first data: ${data.length} bytes`);
+      firstChunk = false;
+    }
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'output', data: btoa(data) }));
     }
@@ -138,7 +143,10 @@ function connect() {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
+    console.log(`[DEBUG] relay msg: ${msg.type}`);
+
     if (msg.type === 'attach') {
+      console.log(`[DEBUG] attaching to session: ${msg.session}`);
       attachSession(msg.session, msg.cols, msg.rows);
 
     } else if (msg.type === 'input') {

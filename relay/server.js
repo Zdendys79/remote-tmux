@@ -34,7 +34,13 @@ wssBrowser.on('connection', (ws, req) => {
   const params = new URL(req.url, 'http://localhost').searchParams;
   const token  = params.get('token');
 
-  if (token !== CLIENT_TOKEN) { ws.close(4001, 'Unauthorized'); return; }
+  console.log(`[DEBUG] Browser WS connected, token match: ${token === CLIENT_TOKEN}, agents: ${agents.size}`);
+
+  if (token !== CLIENT_TOKEN) {
+    console.log('[DEBUG] Browser rejected: bad token');
+    ws.close(4001, 'Unauthorized');
+    return;
+  }
 
   handleClient(ws);
 });
@@ -89,7 +95,9 @@ function handleAgent(ws, name) {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'output') {
-      if (agent.client?.readyState === WebSocket.OPEN) {
+      const hasClient = agent.client?.readyState === WebSocket.OPEN;
+      console.log(`[DEBUG] agent output ${msg.data?.length} bytes, client connected: ${hasClient}`);
+      if (hasClient) {
         agent.client.send(JSON.stringify({ type: 'output', data: msg.data }));
       }
     } else if (msg.type === 'session_list') {
@@ -120,18 +128,23 @@ function handleClient(ws) {
   const client = { ws, agent: null, session: null };
   clients.add(client);
 
+  console.log(`[DEBUG] handleClient: sending agents list (${agentList().length} agents)`);
   ws.send(JSON.stringify({ type: 'agents', list: agentList() }));
 
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
+    console.log(`[DEBUG] Client msg: ${msg.type}`);
+
     if (msg.type === 'list') {
       ws.send(JSON.stringify({ type: 'agents', list: agentList() }));
 
     } else if (msg.type === 'connect') {
+      console.log(`[DEBUG] connect → agent=${msg.agent} session=${msg.session}, known agents: [${[...agents.keys()].join(',')}]`);
       const agentEntry = agents.get(msg.agent);
       if (!agentEntry) {
+        console.log(`[DEBUG] agent not found: ${msg.agent}`);
         ws.send(JSON.stringify({ type: 'error', message: 'Agent not found' }));
         return;
       }
