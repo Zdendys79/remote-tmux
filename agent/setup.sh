@@ -131,8 +131,10 @@ ok "Certificates installed to ${CONFIG_DIR}"
 
 # Download agent files
 info "Downloading agent..."
-curl -fsSL "https://${RELAY_HOST}/agent/agent.js"       -o "${INSTALL_DIR}/agent.js"
-curl -fsSL "https://${RELAY_HOST}/agent/package.json"   -o "${INSTALL_DIR}/package.json"
+curl -fsSL "https://${RELAY_HOST}/agent/agent.js"    -o "${INSTALL_DIR}/agent.js"
+curl -fsSL "https://${RELAY_HOST}/agent/package.json" -o "${INSTALL_DIR}/package.json"
+curl -fsSL "https://${RELAY_HOST}/agent/start.sh"    -o "${INSTALL_DIR}/start.sh"
+chmod +x "${INSTALL_DIR}/start.sh"
 chown -R "${REAL_USER}:${REAL_USER}" "$INSTALL_DIR"
 
 # Write .env
@@ -173,7 +175,7 @@ After=network.target
 Type=simple
 User=${REAL_USER}
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${NODE_BIN} ${INSTALL_DIR}/agent.js
+ExecStart=/bin/bash ${INSTALL_DIR}/start.sh
 Restart=always
 RestartSec=5
 EnvironmentFile=${INSTALL_DIR}/.env
