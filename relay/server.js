@@ -1,63 +1,88 @@
 require('dotenv').config();
+const fs = require('fs');
+const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
-const http = require('http');
 
-const PORT = parseInt(process.env.PORT || '7901');
-const RELAY_TOKEN = process.env.RELAY_TOKEN;
+const PORT       = parseInt(process.env.PORT || '7901');
+const CA_CERT    = process.env.CA_CERT;
+const SERVER_KEY = process.env.SERVER_KEY;
+const SERVER_CRT = process.env.SERVER_CRT;
+// Optional: shared token for browser clients (no mTLS in browser)
+const CLIENT_TOKEN = process.env.CLIENT_TOKEN;
+
 const PING_INTERVAL = 30_000;
 
-if (!RELAY_TOKEN) {
-  console.error('[ERROR] RELAY_TOKEN not set');
-  process.exit(1);
+for (const v of ['CA_CERT', 'SERVER_KEY', 'SERVER_CRT']) {
+  if (!process.env[v]) { console.error(`[ERROR] ${v} not set`); process.exit(1); }
 }
+if (!CLIENT_TOKEN) { console.error('[ERROR] CLIENT_TOKEN not set'); process.exit(1); }
 
-// agent entry: { ws, name, sessions: string[], client: ws|null }
-const agents = new Map();
+// ── HTTPS server with mTLS ─────────────────────────────────────────────────
 
-// client entry: { ws, agent: string|null, session: string|null }
-const clients = new Set();
+const httpsServer = https.createServer({
+  key:  fs.readFileSync(SERVER_KEY),
+  cert: fs.readFileSync(SERVER_CRT),
+  ca:   fs.readFileSync(CA_CERT),
+  // Agents must present a valid client certificate signed by our CA.
+  // Browsers connect without a client cert - handled by role check below.
+  requestCert: true,
+  rejectUnauthorized: false, // we do manual check per role
+});
 
-const server = http.createServer((req, res) => {
+httpsServer.on('request', (req, res) => {
   res.writeHead(200);
   res.end('remote-tmux relay');
 });
 
-const wss = new WebSocketServer({ server });
+// ── WebSocket server ───────────────────────────────────────────────────────
+
+const wss = new WebSocketServer({ server: httpsServer });
+
+// agent entry: { ws, name, sessions, client }
+const agents = new Map();
+// client entries
+const clients = new Set();
 
 wss.on('connection', (ws, req) => {
-  const params = new URL(req.url, `http://localhost`).searchParams;
-  const role = params.get('role');
-  const token = params.get('token');
-
-  if (token !== RELAY_TOKEN) {
-    ws.close(4001, 'Unauthorized');
-    return;
-  }
+  const params = new URL(req.url, `https://localhost`).searchParams;
+  const role   = params.get('role');
 
   if (role === 'agent') {
-    handleAgent(ws, params);
+    // Agents MUST present a valid client certificate signed by our CA
+    const cert = req.socket.getPeerCertificate(true);
+    if (!req.socket.authorized || !cert?.subject?.CN) {
+      ws.close(4001, 'Valid client certificate required');
+      console.log('[WARN] Agent rejected: no valid certificate');
+      return;
+    }
+    const agentName = cert.subject.CN;
+    handleAgent(ws, agentName);
+
   } else if (role === 'client') {
+    // Browsers use a shared token instead of mTLS
+    const token = params.get('token');
+    if (token !== CLIENT_TOKEN) {
+      ws.close(4001, 'Unauthorized');
+      return;
+    }
     handleClient(ws);
+
   } else {
     ws.close(4000, 'Unknown role');
   }
 });
 
-// ─── Agent handling ───────────────────────────────────────────────────────────
+// ── Agent handling ─────────────────────────────────────────────────────────
 
-function handleAgent(ws, params) {
-  const name = params.get('name');
-  if (!name) { ws.close(4002, 'name required'); return; }
-
+function handleAgent(ws, name) {
   if (agents.has(name)) {
     console.log(`[INFO] Agent ${name} reconnected, closing old connection`);
-    const old = agents.get(name);
-    old.ws.close(4010, 'Replaced by new connection');
+    agents.get(name).ws.close(4010, 'Replaced by new connection');
   }
 
   const agent = { ws, name, sessions: [], client: null };
   agents.set(name, agent);
-  console.log(`[INFO] Agent registered: ${name}`);
+  console.log(`[INFO] Agent connected: ${name}`);
   broadcastAgentList();
 
   ws.on('message', (raw) => {
@@ -65,7 +90,7 @@ function handleAgent(ws, params) {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'output') {
-      if (agent.client && agent.client.readyState === WebSocket.OPEN) {
+      if (agent.client?.readyState === WebSocket.OPEN) {
         agent.client.send(JSON.stringify({ type: 'output', data: msg.data }));
       }
     } else if (msg.type === 'session_list') {
@@ -79,25 +104,23 @@ function handleAgent(ws, params) {
     if (agents.get(name) === agent) {
       agents.delete(name);
       console.log(`[INFO] Agent disconnected: ${name}`);
-      if (agent.client && agent.client.readyState === WebSocket.OPEN) {
+      if (agent.client?.readyState === WebSocket.OPEN) {
         agent.client.send(JSON.stringify({ type: 'agent_disconnected', agent: name }));
       }
       broadcastAgentList();
     }
   });
 
-  // heartbeat
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 }
 
-// ─── Client handling ──────────────────────────────────────────────────────────
+// ── Client handling ────────────────────────────────────────────────────────
 
 function handleClient(ws) {
   const client = { ws, agent: null, session: null };
   clients.add(client);
 
-  // send current agent list immediately
   ws.send(JSON.stringify({ type: 'agents', list: agentList() }));
 
   ws.on('message', (raw) => {
@@ -113,11 +136,10 @@ function handleClient(ws) {
         ws.send(JSON.stringify({ type: 'error', message: 'Agent not found' }));
         return;
       }
-      // detach previous client from that agent if any
       if (agentEntry.client && agentEntry.client !== ws) {
         agentEntry.client.send(JSON.stringify({ type: 'disconnected', reason: 'replaced' }));
       }
-      client.agent = msg.agent;
+      client.agent   = msg.agent;
       client.session = msg.session;
       agentEntry.client = ws;
       agentEntry.ws.send(JSON.stringify({ type: 'attach', session: msg.session }));
@@ -126,13 +148,13 @@ function handleClient(ws) {
 
     } else if (msg.type === 'input') {
       const agentEntry = client.agent ? agents.get(client.agent) : null;
-      if (agentEntry && agentEntry.ws.readyState === WebSocket.OPEN) {
+      if (agentEntry?.ws.readyState === WebSocket.OPEN) {
         agentEntry.ws.send(JSON.stringify({ type: 'input', data: msg.data }));
       }
 
     } else if (msg.type === 'resize') {
       const agentEntry = client.agent ? agents.get(client.agent) : null;
-      if (agentEntry && agentEntry.ws.readyState === WebSocket.OPEN) {
+      if (agentEntry?.ws.readyState === WebSocket.OPEN) {
         agentEntry.ws.send(JSON.stringify({ type: 'resize', cols: msg.cols, rows: msg.rows }));
       }
     }
@@ -140,10 +162,9 @@ function handleClient(ws) {
 
   ws.on('close', () => {
     clients.delete(client);
-    // detach this client from its agent
     if (client.agent) {
       const agentEntry = agents.get(client.agent);
-      if (agentEntry && agentEntry.client === ws) {
+      if (agentEntry?.client === ws) {
         agentEntry.client = null;
         agentEntry.ws.send(JSON.stringify({ type: 'detach' }));
       }
@@ -151,10 +172,14 @@ function handleClient(ws) {
   });
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 function agentList() {
-  return [...agents.values()].map(a => ({ name: a.name, sessions: a.sessions, busy: !!a.client }));
+  return [...agents.values()].map(a => ({
+    name: a.name,
+    sessions: a.sessions,
+    busy: !!a.client,
+  }));
 }
 
 function broadcastAgentList() {
@@ -164,7 +189,7 @@ function broadcastAgentList() {
   }
 }
 
-// ─── Heartbeat (detect dead agent connections) ────────────────────────────────
+// ── Heartbeat ──────────────────────────────────────────────────────────────
 
 const pingTimer = setInterval(() => {
   for (const agent of agents.values()) {
@@ -180,8 +205,8 @@ const pingTimer = setInterval(() => {
 
 wss.on('close', () => clearInterval(pingTimer));
 
-// ─── Start ────────────────────────────────────────────────────────────────────
+// ── Start ──────────────────────────────────────────────────────────────────
 
-server.listen(PORT, () => {
-  console.log(`[INFO] Relay server listening on port ${PORT}`);
+httpsServer.listen(PORT, () => {
+  console.log(`[INFO] Relay server (mTLS) listening on port ${PORT}`);
 });

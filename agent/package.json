@@ -1,0 +1,14 @@
+{
+  "name": "remote-tmux-agent",
+  "version": "1.0.0",
+  "description": "Agent for remote-tmux relay",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "node-pty": "^1.0.0",
+    "dotenv": "^16.4.7"
+  }
+}
