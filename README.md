@@ -34,6 +34,33 @@ Agents initiate **outbound** connections → works behind any NAT or firewall.
 | tmux | Each agent machine |
 | conspy | Each agent machine (only for TTY console access) |
 
+## Dependencies
+
+**Relay** (`relay/package.json`):
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| [ws](https://github.com/websockets/ws) | ^8.18 | WebSocket server |
+| [dotenv](https://github.com/motdotla/dotenv) | ^16.4 | Load `.env` config |
+
+**Agent** (`agent/package.json`):
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| [ws](https://github.com/websockets/ws) | ^8.18 | WebSocket client |
+| [node-pty](https://github.com/microsoft/node-pty) | ^1.0 | Spawn and attach to PTY (tmux, TTY) |
+| [dotenv](https://github.com/motdotla/dotenv) | ^16.4 | Load `.env` config |
+
+**Frontend** (no build step, loaded from CDN):
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| [xterm.js](https://xtermjs.org/) | 5.3.0 | Terminal emulator in browser |
+| [xterm-addon-fit](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) | 0.8.0 | Auto-resize terminal to container |
+
+> `node-pty` requires native compilation — `npm install` needs build tools (`python3`, `make`, `g++`).
+> On Ubuntu/Debian: `sudo apt-get install build-essential python3`
+
 ---
 
 ## Relay Server Setup
