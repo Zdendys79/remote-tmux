@@ -153,8 +153,7 @@
 
     function sendAndClear() {
       const val = inputText.value;
-      if (!val) return;
-      sendInput(val);
+      sendInput(val + '\r'); // always append Enter so commands execute
       inputText.value = '';
       inputText.style.height = '';
       term.focus();
