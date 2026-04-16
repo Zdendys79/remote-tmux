@@ -116,7 +116,8 @@ function connect() {
   ws = new WebSocket(url, {
     key:  fs.readFileSync(AGENT_KEY),
     cert: fs.readFileSync(AGENT_CERT),
-    ca:   fs.readFileSync(CA_CERT),
+    // CA_CERT is used by the relay to verify client certs - not needed here.
+    // Server cert is verified against system trusted CAs (Let's Encrypt etc.)
     rejectUnauthorized: true,
   });
 
