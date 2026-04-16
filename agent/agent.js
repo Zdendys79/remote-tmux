@@ -78,7 +78,7 @@ function attachSession(sessionName, cols, rows) {
     // TTY via conspy (requires root or tty group)
     const ttyNum = sessionName.replace(/[^0-9]/g, '');
     command = 'conspy';
-    args = [ttyNum];
+    args = ['-W', String(cols || 220), '-H', String(rows || 50), ttyNum];
   }
 
   console.log(`[INFO] Attaching to ${entry.type} session: ${sessionName}`);
