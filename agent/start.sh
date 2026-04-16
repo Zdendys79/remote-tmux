@@ -29,4 +29,6 @@ else
 fi
 rm -f "$TMP"
 
-exec node "$AGENT_JS"
+# Use NODE_BIN from .env if set (handles NVM/non-standard paths)
+NODE="${NODE_BIN:-$(command -v node 2>/dev/null || echo node)}"
+exec "$NODE" "$AGENT_JS"

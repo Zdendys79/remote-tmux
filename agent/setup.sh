@@ -138,6 +138,8 @@ chmod +x "${INSTALL_DIR}/start.sh"
 chown -R "${REAL_USER}:${REAL_USER}" "$INSTALL_DIR"
 
 # Write .env
+NODE_BIN=$(command -v node)
+
 cat > "${INSTALL_DIR}/.env" <<ENV
 RELAY_URL=wss://${RELAY_HOST}:${RELAY_AGENT_PORT}/ws
 AGENT_NAME=${AGENT_NAME}
@@ -146,6 +148,7 @@ AGENT_CERT=${CONFIG_DIR}/${AGENT_NAME}.crt
 CA_CERT=${CONFIG_DIR}/ca.crt
 TMUX_SESSIONS=${TMUX_SESSIONS}
 TTY_SESSIONS=${TTY_SESSIONS}
+NODE_BIN=${NODE_BIN}
 ENV
 chmod 600 "${INSTALL_DIR}/.env"
 chown "${REAL_USER}:${REAL_USER}" "${INSTALL_DIR}/.env"
