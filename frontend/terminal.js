@@ -8,6 +8,15 @@
   function saveToken(token)  { localStorage.setItem(TOKEN_KEY, token); }
   function clearToken()      { localStorage.removeItem(TOKEN_KEY); }
 
+  // ── Encoding helpers (handle full Unicode, not just Latin-1) ──────────────
+  function toBase64(str) {
+    const bytes = new TextEncoder().encode(str);
+    return btoa(String.fromCharCode(...bytes));
+  }
+  function fromBase64(b64) {
+    return new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+  }
+
   function wsUrl() {
     return `${RELAY_WS}?role=client&token=${encodeURIComponent(getToken())}`;
   }
@@ -106,7 +115,7 @@
     tabWs.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'output') {
-        term.write(atob(msg.data));
+        term.write(fromBase64(msg.data));
       } else if (msg.type === 'agent_disconnected') {
         term.write('\r\n\x1b[31m[Agent odpojen]\x1b[0m\r\n');
       }
@@ -121,11 +130,52 @@
       term.write('\r\n\x1b[33m[Spojení přerušeno]\x1b[0m\r\n');
     });
 
-    term.onData((data) => {
+    function sendInput(text) {
       if (tabWs.readyState === WebSocket.OPEN) {
-        tabWs.send(JSON.stringify({ type: 'input', data: btoa(data) }));
+        tabWs.send(JSON.stringify({ type: 'input', data: toBase64(text) }));
+      }
+    }
+
+    // Direct key capture (desktop — special keys, Ctrl+C, arrows, etc.)
+    term.onData((data) => sendInput(data));
+
+    // ── Text input bar (diacritics, mobile IME) ──────────────────────────────
+    const inputBar = document.createElement('div');
+    inputBar.className = 'input-bar';
+    inputBar.innerHTML = `
+      <textarea class="input-text" rows="1" placeholder="Zadejte text (Enter = odeslat, Shift+Enter = nový řádek)"></textarea>
+      <button class="input-send">↵</button>
+    `;
+    div.appendChild(inputBar);
+
+    const inputText = inputBar.querySelector('.input-text');
+    const inputSend = inputBar.querySelector('.input-send');
+
+    function sendAndClear() {
+      const val = inputText.value;
+      if (!val) return;
+      sendInput(val);
+      inputText.value = '';
+      inputText.style.height = '';
+      term.focus();
+    }
+
+    inputText.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendAndClear();
       }
     });
+
+    inputText.addEventListener('input', () => {
+      inputText.style.height = '';
+      inputText.style.height = Math.min(inputText.scrollHeight, 120) + 'px';
+    });
+
+    inputSend.addEventListener('click', () => sendAndClear());
+
+    // Prevent xterm from stealing focus when typing in input bar
+    inputText.addEventListener('focus', () => term.blur());
 
     const ro = new ResizeObserver(() => fitAndSend());
     ro.observe(div);

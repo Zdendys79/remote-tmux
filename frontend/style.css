@@ -99,19 +99,77 @@ html, body {
   min-height: 0;
   position: relative;
   background: #000;
+  display: flex;
+  flex-direction: column;
 }
 
 .xterm-instance {
   position: absolute;
   inset: 0;
+  bottom: 38px; /* leave room for input bar */
   display: none;
+  flex-direction: column;
 }
 
-.xterm-instance.active { display: block; }
+.xterm-instance.active { display: flex; }
 
 .xterm-instance .xterm {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
+
+/* ── Input bar ── */
+
+.input-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: auto;
+  min-height: 38px;
+  max-height: 160px;
+  display: flex;
+  align-items: flex-end;
+  background: #111;
+  border-top: 1px solid #2a2a2a;
+  padding: 4px 6px;
+  gap: 6px;
+  z-index: 10;
+}
+
+.input-text {
+  flex: 1;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  color: #eee;
+  font-family: monospace;
+  font-size: 14px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  resize: none;
+  line-height: 1.4;
+  max-height: 120px;
+  overflow-y: auto;
+  outline: none;
+}
+
+.input-text:focus { border-color: #4a9eff; }
+
+.input-send {
+  background: #4a9eff;
+  border: none;
+  color: #000;
+  font-size: 16px;
+  font-weight: bold;
+  width: 32px;
+  height: 28px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+.input-send:hover { background: #6ab4ff; }
 
 /* ── Connect dialog ── */
 

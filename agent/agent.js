@@ -147,7 +147,8 @@ function connect() {
 
     } else if (msg.type === 'input') {
       if (activePty) {
-        activePty.write(atob(msg.data));
+        // Decode UTF-8 bytes from base64 back to string
+        activePty.write(Buffer.from(msg.data, 'base64').toString('utf8'));
       }
 
     } else if (msg.type === 'resize') {
