@@ -1,75 +1,74 @@
 require('dotenv').config();
-const fs = require('fs');
+const fs    = require('fs');
+const http  = require('http');
 const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
 
-const PORT       = parseInt(process.env.PORT || '7901');
-const CA_CERT    = process.env.CA_CERT;
-const SERVER_KEY = process.env.SERVER_KEY;
-const SERVER_CRT = process.env.SERVER_CRT;
-// Optional: shared token for browser clients (no mTLS in browser)
+const PORT_BROWSER = parseInt(process.env.PORT_BROWSER || '7901'); // plain HTTP, behind Apache
+const PORT_AGENT   = parseInt(process.env.PORT_AGENT   || '7902'); // HTTPS+mTLS, direct
+const CA_CERT      = process.env.CA_CERT;
+const SERVER_KEY   = process.env.SERVER_KEY;
+const SERVER_CRT   = process.env.SERVER_CRT;
 const CLIENT_TOKEN = process.env.CLIENT_TOKEN;
+
+for (const v of ['CA_CERT', 'SERVER_KEY', 'SERVER_CRT', 'CLIENT_TOKEN']) {
+  if (!process.env[v]) { console.error(`[ERROR] ${v} not set`); process.exit(1); }
+}
 
 const PING_INTERVAL = 30_000;
 
-for (const v of ['CA_CERT', 'SERVER_KEY', 'SERVER_CRT']) {
-  if (!process.env[v]) { console.error(`[ERROR] ${v} not set`); process.exit(1); }
-}
-if (!CLIENT_TOKEN) { console.error('[ERROR] CLIENT_TOKEN not set'); process.exit(1); }
+// agent entry: { ws, name, sessions, client }
+const agents  = new Map();
+const clients = new Set();
 
-// ── HTTPS server with mTLS ─────────────────────────────────────────────────
+// ── Browser server (plain HTTP, port 7901) ─────────────────────────────────
 
-const httpsServer = https.createServer({
-  key:  fs.readFileSync(SERVER_KEY),
-  cert: fs.readFileSync(SERVER_CRT),
-  ca:   fs.readFileSync(CA_CERT),
-  // Agents must present a valid client certificate signed by our CA.
-  // Browsers connect without a client cert - handled by role check below.
-  requestCert: true,
-  rejectUnauthorized: false, // we do manual check per role
-});
-
-httpsServer.on('request', (req, res) => {
+const browserServer = http.createServer((req, res) => {
   res.writeHead(200);
   res.end('remote-tmux relay');
 });
 
-// ── WebSocket server ───────────────────────────────────────────────────────
+const wssBrowser = new WebSocketServer({ server: browserServer });
 
-const wss = new WebSocketServer({ server: httpsServer });
+wssBrowser.on('connection', (ws, req) => {
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const token  = params.get('token');
 
-// agent entry: { ws, name, sessions, client }
-const agents = new Map();
-// client entries
-const clients = new Set();
+  if (token !== CLIENT_TOKEN) { ws.close(4001, 'Unauthorized'); return; }
 
-wss.on('connection', (ws, req) => {
-  const params = new URL(req.url, `https://localhost`).searchParams;
-  const role   = params.get('role');
+  handleClient(ws);
+});
 
-  if (role === 'agent') {
-    // Agents MUST present a valid client certificate signed by our CA
-    const cert = req.socket.getPeerCertificate(true);
-    if (!req.socket.authorized || !cert?.subject?.CN) {
-      ws.close(4001, 'Valid client certificate required');
-      console.log('[WARN] Agent rejected: no valid certificate');
-      return;
-    }
-    const agentName = cert.subject.CN;
-    handleAgent(ws, agentName);
+browserServer.listen(PORT_BROWSER, '127.0.0.1', () => {
+  console.log(`[INFO] Browser WS listening on 127.0.0.1:${PORT_BROWSER}`);
+});
 
-  } else if (role === 'client') {
-    // Browsers use a shared token instead of mTLS
-    const token = params.get('token');
-    if (token !== CLIENT_TOKEN) {
-      ws.close(4001, 'Unauthorized');
-      return;
-    }
-    handleClient(ws);
+// ── Agent server (HTTPS+mTLS, port 7902) ──────────────────────────────────
 
-  } else {
-    ws.close(4000, 'Unknown role');
-  }
+const agentServer = https.createServer({
+  key:  fs.readFileSync(SERVER_KEY),
+  cert: fs.readFileSync(SERVER_CRT),
+  ca:   fs.readFileSync(CA_CERT),
+  requestCert:        true,
+  rejectUnauthorized: true, // agents MUST present valid cert
+});
+
+agentServer.on('request', (req, res) => {
+  res.writeHead(200);
+  res.end('remote-tmux agent endpoint');
+});
+
+const wssAgent = new WebSocketServer({ server: agentServer });
+
+wssAgent.on('connection', (ws, req) => {
+  const cert = req.socket.getPeerCertificate();
+  const name = cert?.subject?.CN;
+  if (!name) { ws.close(4001, 'Valid client certificate required'); return; }
+  handleAgent(ws, name);
+});
+
+agentServer.listen(PORT_AGENT, () => {
+  console.log(`[INFO] Agent WSS (mTLS) listening on 0.0.0.0:${PORT_AGENT}`);
 });
 
 // ── Agent handling ─────────────────────────────────────────────────────────
@@ -176,9 +175,7 @@ function handleClient(ws) {
 
 function agentList() {
   return [...agents.values()].map(a => ({
-    name: a.name,
-    sessions: a.sessions,
-    busy: !!a.client,
+    name: a.name, sessions: a.sessions, busy: !!a.client,
   }));
 }
 
@@ -202,11 +199,3 @@ const pingTimer = setInterval(() => {
     agent.ws.ping();
   }
 }, PING_INTERVAL);
-
-wss.on('close', () => clearInterval(pingTimer));
-
-// ── Start ──────────────────────────────────────────────────────────────────
-
-httpsServer.listen(PORT, () => {
-  console.log(`[INFO] Relay server (mTLS) listening on port ${PORT}`);
-});
