@@ -19,8 +19,11 @@ if curl -fsSL --max-time 10 "$UPDATE_URL" -o "$TMP" 2>/dev/null; then
   OLD_HASH=$(sha256sum "$AGENT_JS" 2>/dev/null | cut -d' ' -f1 || echo "none")
   NEW_HASH=$(sha256sum "$TMP"      | cut -d' ' -f1)
   if [[ "$OLD_HASH" != "$NEW_HASH" ]]; then
-    cp "$TMP" "$AGENT_JS"
-    echo "[INFO] agent.js updated (${OLD_HASH:0:12} -> ${NEW_HASH:0:12})"
+    if cp "$TMP" "$AGENT_JS" 2>/dev/null; then
+      echo "[INFO] agent.js updated (${OLD_HASH:0:12} -> ${NEW_HASH:0:12})"
+    else
+      echo "[WARN] Update downloaded but could not replace agent.js (permission denied), using existing"
+    fi
   else
     echo "[INFO] agent.js is up to date"
   fi
